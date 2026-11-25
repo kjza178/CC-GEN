@@ -279,15 +279,20 @@ function generateCardNumber(bin) {
         desiredLength = 16; // Most other cards (Visa, Mastercard, etc.)
     }
 
-    let cardNumber = bin;
+    // Guard: if the BIN is already as long as (or longer than) the body,
+    // trim it so the final number keeps the correct length instead of
+    // overflowing by one digit when the check digit is appended.
+    let cardNumber = bin.slice(0, desiredLength - 1);
     while (cardNumber.length < desiredLength - 1) {
         cardNumber += Math.floor(Math.random() * 10);
     }
 
     let sum = 0;
-    let alternate = false;
+    // The check digit will occupy the units position, so the right-most digit
+    // of the body must be doubled -> start the alternating flag as true.
+    let alternate = true;
     for (let i = cardNumber.length - 1; i >= 0; i--) {
-        let n = parseInt(cardNumber.charAt(i));
+        let n = parseInt(cardNumber.charAt(i), 10);
         if (alternate) {
             n *= 2;
             if (n > 9) {
@@ -308,14 +313,23 @@ function generateCVV(cardNumber) {
 }
 
 $(document).ready(function() {
+  // Rebuild the year dropdown from the current year so already-expired
+  // years (e.g. the old hard-coded 2024/2025) are never offered.
+  var $yearSelect = $('select[name="year"]');
+  var nowYear = new Date().getFullYear();
+  $yearSelect.find('option').not('[value=""]').remove();
+  for (var y = nowYear; y <= nowYear + 8; y++) {
+    $yearSelect.append('<option value="' + y + '">' + y + '</option>');
+  }
+
   $('#codehap').submit(function(e) {
     e.preventDefault();
-    
+
     $('.wait-loading').show();
     $('#submit').hide();
 
-    var bin = $('input[name="bin"]').val();
-    var quantity = parseInt($('input[name="number"]').val());
+    var bin = $('input[name="bin"]').val().trim();
+    var quantity = parseInt($('input[name="number"]').val(), 10);
     var includeDate = $('input[name="date"]').is(':checked');
     var includeCSV = $('input[name="csv"]').is(':checked');
     var month = $('select[name="s_date"]').val();
@@ -323,13 +337,31 @@ $(document).ready(function() {
     var csv = $('input[name="s_csv"]').val();
     var format = $('select[name="format"]').val();
 
+    // --- Input validation ---
+    function showError(msg) {
+      $('#result').val('Error: ' + msg);
+      $('.wait-loading').hide();
+      $('#submit').show();
+    }
+    if (!/^\d{6,18}$/.test(bin)) {
+      showError('BIN must be 6-18 digits (numbers only).');
+      return;
+    }
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      showError('Quantity must be a positive whole number.');
+      return;
+    }
+    if (quantity > 10000) {
+      quantity = 10000; // cap to keep the browser responsive
+    }
+
     var cards = [];
     for (var i = 0; i < quantity; i++) {
       var cardNumber = generateCardNumber(bin);
       var card = {
         number: cardNumber,
-        month: includeDate ? (month ? parseInt(month) : Math.floor(Math.random() * 12) + 1) : undefined,
-        year: includeDate ? (year ? parseInt(year) : Math.floor(Math.random() * 9) + 2024) : undefined,
+        month: includeDate ? (month ? parseInt(month, 10) : Math.floor(Math.random() * 12) + 1) : undefined,
+        year: includeDate ? (year ? parseInt(year, 10) : new Date().getFullYear() + Math.floor(Math.random() * 9)) : undefined,
         cvv: includeCSV ? (csv ? csv : generateCVV(cardNumber)) : undefined
       };
       
@@ -347,6 +379,8 @@ $(document).ready(function() {
       case 'json':
         result = JSON.stringify(cards, null, 2);
         break;
+      default:
+        result = cards.map(c => Object.values(c).join('|')).join('\n');
     }
 
     $('#result').val(result);
